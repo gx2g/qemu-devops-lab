@@ -1,0 +1,67 @@
+#cloud-config
+# =============================================================================
+# scripts/cloud-init/user-data
+# Configures the Ubuntu guest on first boot via cloud-init.
+#
+# This file is injected via the seed ISO and read by cloud-init during boot.
+# Customize this to:
+#   - Change credentials
+#   - Add your SSH public key
+#   - Install additional packages
+#   - Run first-boot commands
+# =============================================================================
+
+# ── Hostname ──────────────────────────────────────────────────────────────────
+hostname: qemu-devops-lab
+manage_etc_hosts: true
+
+# ── User account ─────────────────────────────────────────────────────────────
+# Sets up the default 'ubuntu' user with password auth enabled.
+# Replace the ssh_authorized_keys entry with your own public key for key-based auth.
+users:
+  - name: ubuntu
+    gecos: "Ubuntu User"
+    shell: /bin/bash
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    lock_passwd: false
+    # Password: 'ubuntu' (hashed)
+    # Generate your own: openssl passwd -6 yourpassword
+    passwd: "$6$rounds=4096$saltsaltsaltsalt$oMdxqo8UJCrJbQcO9wOyH8GqNBQBvZLl.rJJxHbGzSzT4yPJFJT2KrP5BOFJsqB5Rm0K9CuIvM3P4nYnKxJ1/"
+
+# ── SSH configuration ─────────────────────────────────────────────────────────
+# Enables password auth so 'make verify' works out of the box.
+# For production: set 'PasswordAuthentication no' and use ssh_authorized_keys.
+ssh_pwauth: true
+
+# To add your own SSH key, uncomment and replace below:
+# ssh_authorized_keys:
+#   - ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIYOUR_PUBLIC_KEY_HERE you@yourhost
+
+# ── Packages ──────────────────────────────────────────────────────────────────
+package_update: true
+package_upgrade: false
+
+packages:
+  - curl
+  - wget
+  - vim
+  - htop
+  - net-tools
+  - iputils-ping
+
+# ── First-boot commands ───────────────────────────────────────────────────────
+runcmd:
+  # Expand the filesystem to fill the resized disk
+  - growpart /dev/vda 1
+  - resize2fs /dev/vda1
+  # Print confirmation to console (visible in serial log)
+  - echo "=== cloud-init complete: qemu-devops-lab is ready ==="
+  - echo "=== SSH on localhost:2222, user ubuntu, pass ubuntu ==="
+
+# ── Final message ─────────────────────────────────────────────────────────────
+final_message: |
+  ========================================
+  qemu-devops-lab guest is ready!
+  SSH: ubuntu@localhost -p 2222
+  Password: ubuntu
+  ========================================

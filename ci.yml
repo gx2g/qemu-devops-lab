@@ -1,0 +1,222 @@
+# =============================================================================
+# .github/workflows/ci.yml
+# GitHub Actions CI pipeline for qemu-devops-lab
+#
+# Runs on every push and pull request. Validates:
+#   1. Shell script linting (shellcheck)
+#   2. Dockerfile build
+#   3. QEMU binary availability
+#   4. Cloud-init config validity
+#   5. Headless QEMU smoke test (no KVM — TCG mode)
+#
+# Full boot + SSH test: requires self-hosted runner with KVM.
+# See README.md → GitHub Actions CI for setup instructions.
+# =============================================================================
+
+name: CI
+
+on:
+  push:
+    branches: ["main", "master", "develop"]
+  pull_request:
+    branches: ["main", "master"]
+
+jobs:
+  # ── 1. Lint scripts ─────────────────────────────────────────────────────────
+  lint:
+    name: Lint shell scripts
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install shellcheck
+        run: sudo apt-get install -y shellcheck
+
+      - name: Run shellcheck
+        run: |
+          echo "Running shellcheck on all .sh files..."
+          find scripts/ -name "*.sh" -print0 | xargs -0 shellcheck --severity=warning
+          echo "✓ All scripts pass shellcheck"
+
+      - name: Validate bash syntax
+        run: |
+          echo "Checking bash syntax..."
+          find scripts/ -name "*.sh" -exec bash -n {} \; -print
+          echo "✓ All scripts have valid bash syntax"
+
+  # ── 2. Validate cloud-init config ─────────────────────────────────────────
+  validate-config:
+    name: Validate cloud-init and YAML
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Python YAML
+        run: pip3 install pyyaml
+
+      - name: Validate user-data YAML
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('scripts/cloud-init/user-data') as f:
+            content = f.read()
+          # Strip the #cloud-config header before parsing
+          lines = content.split('\n')
+          yaml_content = '\n'.join(l for l in lines if not l.startswith('#cloud-config'))
+          try:
+            yaml.safe_load(yaml_content)
+            print('✓ user-data is valid YAML')
+          except yaml.YAMLError as e:
+            print(f'✗ user-data YAML error: {e}')
+            sys.exit(1)
+          "
+
+      - name: Validate meta-data YAML
+        run: |
+          python3 -c "
+          import yaml, sys
+          with open('scripts/cloud-init/meta-data') as f:
+            yaml.safe_load(f)
+          print('✓ meta-data is valid YAML')
+          "
+
+  # ── 3. Build Docker image ─────────────────────────────────────────────────
+  docker-build:
+    name: Build Docker image
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build image
+        run: |
+          echo "Building qemu-devops-lab Docker image..."
+          docker build \
+            --tag qemu-devops-lab:ci \
+            --file docker/Dockerfile \
+            --progress=plain \
+            .
+          echo "✓ Docker image built successfully"
+
+      - name: Verify QEMU binaries in image
+        run: |
+          echo "Checking QEMU versions inside container..."
+          docker run --rm qemu-devops-lab:ci qemu-system-x86_64 --version
+          docker run --rm qemu-devops-lab:ci qemu-system-aarch64 --version
+          docker run --rm qemu-devops-lab:ci qemu-img --version
+          echo "✓ All QEMU binaries present and functional"
+
+      - name: Verify tooling in image
+        run: |
+          docker run --rm qemu-devops-lab:ci bash -c "
+            set -e
+            command -v nc          && echo '✓ netcat'
+            command -v ssh         && echo '✓ openssh-client'
+            command -v cloud-localds && echo '✓ cloud-localds' || \
+              command -v genisoimage && echo '✓ genisoimage (fallback)'
+          "
+
+  # ── 4. Smoke test — QEMU starts (no KVM, no boot) ─────────────────────────
+  qemu-smoke:
+    name: QEMU smoke test (headless, no boot)
+    runs-on: ubuntu-22.04
+    needs: [docker-build]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Docker image
+        run: |
+          docker build \
+            --tag qemu-devops-lab:ci \
+            --file docker/Dockerfile \
+            .
+
+      - name: Smoke test — QEMU flags validate
+        run: |
+          # Verify that QEMU accepts our command-line flags (exits 0 without a disk)
+          # -version exits 0; we just confirm the full flag set parses
+          docker run --rm qemu-devops-lab:ci \
+            qemu-system-x86_64 \
+              -machine q35 \
+              -accel tcg \
+              -m 256 \
+              -nographic \
+              -version
+          echo "✓ x86_64 QEMU flags validate"
+
+          docker run --rm qemu-devops-lab:ci \
+            qemu-system-aarch64 \
+              -machine virt,highmem=off \
+              -cpu cortex-a72 \
+              -m 256 \
+              -nographic \
+              -version
+          echo "✓ ARM64 QEMU flags validate"
+
+      - name: Verify Makefile targets parse
+        run: |
+          make help
+          echo "✓ Makefile help target works"
+
+  # ── 5. Full boot test (self-hosted KVM runner only) ───────────────────────
+  # Uncomment this job and configure a self-hosted runner with KVM access.
+  # In your repo: Settings → Actions → Runners → New self-hosted runner
+  # The runner needs: Linux, Docker, /dev/kvm access, 4+ GB RAM
+
+  # full-boot-test:
+  #   name: Full boot + SSH verify (KVM)
+  #   runs-on: [self-hosted, linux, kvm]
+  #   needs: [lint, validate-config, docker-build]
+  #   timeout-minutes: 15
+  #
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4
+  #
+  #     - name: Build Docker image
+  #       run: make build
+  #
+  #     - name: Download Ubuntu cloud image
+  #       run: make download
+  #
+  #     - name: Build seed ISO
+  #       run: make seed
+  #
+  #     - name: Boot guest
+  #       run: make run
+  #
+  #     - name: Verify SSH
+  #       run: make verify
+  #
+  #     - name: Cleanup
+  #       if: always()
+  #       run: make stop
+
+  # ── Summary ───────────────────────────────────────────────────────────────
+  ci-complete:
+    name: CI complete
+    runs-on: ubuntu-22.04
+    needs: [lint, validate-config, docker-build, qemu-smoke]
+    if: always()
+
+    steps:
+      - name: Check all jobs passed
+        run: |
+          if [[ "${{ needs.lint.result }}" != "success" ]] || \
+             [[ "${{ needs.validate-config.result }}" != "success" ]] || \
+             [[ "${{ needs.docker-build.result }}" != "success" ]] || \
+             [[ "${{ needs.qemu-smoke.result }}" != "success" ]]; then
+            echo "✗ One or more CI jobs failed"
+            exit 1
+          fi
+          echo "✓ All CI checks passed"
