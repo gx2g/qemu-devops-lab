@@ -2,6 +2,14 @@
 
 > A production-quality DevOps reference project demonstrating QEMU hardware emulation — booting real Ubuntu cloud images on both **x86_64** and **ARM64**, with Docker-based reproducibility, SSH verification, and GitHub Actions CI.
 
+[![QEMU](https://img.shields.io/badge/QEMU-8.x-orange.svg)](https://www.qemu.org/)
+[![Ubuntu](https://img.shields.io/badge/Ubuntu-22.04_LTS-E95420.svg)](https://cloud-images.ubuntu.com/)
+[![Docker](https://img.shields.io/badge/Docker-20.x+-2496ED.svg)](https://www.docker.com/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![CI](https://github.com/gx2g/qemu-devops-lab/actions/workflows/ci.yml/badge.svg)](https://github.com/gx2g/qemu-devops-lab/actions/workflows/ci.yml)
+[![Arch: x86_64](https://img.shields.io/badge/arch-x86__64-blue.svg)]()
+[![Arch: ARM64](https://img.shields.io/badge/arch-ARM64-blue.svg)]()
+[![Shell](https://img.shields.io/badge/shell-bash-4EAA25.svg)](https://www.gnu.org/software/bash/)
 ---
 
 ## Table of Contents
